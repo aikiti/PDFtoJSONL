@@ -1,0 +1,60 @@
+name: build_portable_zip
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build EXE (onedir is safer with PyMuPDF)
+        run: |
+          pyinstaller --noconfirm --onedir --name pdf2jsonl-ocr pdf_to_jsonl_ocr_v4.py
+
+      - name: Install Tesseract via Chocolatey
+        run: |
+          choco install -y tesseract
+        shell: powershell
+
+      - name: Bundle Tesseract and prune languages
+        shell: powershell
+        run: |
+          Copy-Item -Recurse -Force "C:\Program Files\Tesseract-OCR" ".\dist\pdf2jsonl-ocr\Tesseract-OCR"
+          $keep = @('eng.traineddata','jpn.traineddata','osd.traineddata')
+          Get-ChildItem ".\dist\pdf2jsonl-ocr\Tesseract-OCR\tessdata\*.traineddata" | ForEach-Object {
+            if($keep -notcontains $_.Name){ Remove-Item $_.FullName -Force }
+          }
+          New-Item -ItemType Directory -Force ".\dist\pdf2jsonl-ocr\LICENSES" | Out-Null
+          if(Test-Path "C:\Program Files\Tesseract-OCR\LICENSE"){ Copy-Item "C:\Program Files\Tesseract-OCR\LICENSE" ".\dist\pdf2jsonl-ocr\LICENSES\" }
+          if(Test-Path "C:\Program Files\Tesseract-OCR\NOTICE"){  Copy-Item "C:\Program Files\Tesseract-OCR\NOTICE"  ".\dist\pdf2jsonl-ocr\LICENSES\" }
+
+      - name: Add portable runner scripts
+        run: |
+          mkdir ".\dist\pdf2jsonl-ocr\windows"
+          copy ".\windows\run_ocr_portable.bat" ".\dist\pdf2jsonl-ocr\windows\run_ocr_portable.bat"
+          copy ".\windows\_set_tesseract_portable.bat" ".\dist\pdf2jsonl-ocr\windows\_set_tesseract_portable.bat"
+
+      - name: Create ZIP artifact
+        shell: powershell
+        run: |
+          Compress-Archive -Path ".\dist\pdf2jsonl-ocr\*" -DestinationPath ".\pdf2jsonl-ocr_portable_win.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf2jsonl-ocr_portable_win
+          path: pdf2jsonl-ocr_portable_win.zip
